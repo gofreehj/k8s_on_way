@@ -1,0 +1,10 @@
+# kafka/kafka-oss-rrsa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-broker-sa
+  # This annotation is the key to enabling RRSA for this Service Account.
+  # The value must be the ARN of the RAM Role you created for OSS access.
+  # IMPORTANT: Replace the placeholder below with your actual RAM Role ARN.
+  annotations:
+    ram.aliyuncs.com/role-arn: "acs:ram::1467234491927727:role/dev-ack-oss"

@@ -1,0 +1,20 @@
+# https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/user-guide/use-dynamically-provisioned-oss-volumes?
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: alicloud-sc-oss
+parameters:
+  bucket: ack-dev-oss  # 替换为实际Bucket名称。
+  path: /
+  url: oss-cn-beijing-internal.aliyuncs.com
+  authType: rrsa
+  roleName: dev-ack-oss
+  # 👇 引用包含 AK/SK 的 Secret
+  # authType: "accessKey"
+  # accessKeySecretName: oss-secret
+  # accessKeySecretNamespace: kafka
+  otherOpts: "-o umask=022 -o max_stat_cache_size=0 -o allow_other -o uid=1001 -o gid=0 -o mp_umask=022"
+  volumeAs: sharepath
+provisioner: ossplugin.csi.alibabacloud.com
+reclaimPolicy: Retain
+volumeBindingMode: Immediate

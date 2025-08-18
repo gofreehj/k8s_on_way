@@ -1,0 +1,185 @@
+# This configuration is based on the production-ready 'kafka-persistent.yaml'
+# and adds Tiered Storage capability using the Aiven plugin, strictly following
+# the official Strimzi blog post's methodology.
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: controller
+  labels:
+    strimzi.io/cluster: kafka-cluster-dev
+spec:
+  replicas: 3
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 20Gi
+        class: alicloud-disk-essd
+        deleteClaim: false
+  template:
+    kafkaContainer:
+      env:
+        - name: JAVA_TOOL_OPTIONS
+          value: "--add-modules=jdk.httpserver "
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: broker
+  labels:
+    strimzi.io/cluster: kafka-cluster-dev
+spec:
+  replicas: 3
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 20Gi
+        class: alicloud-disk-essd
+        deleteClaim: false
+  template:
+    pod:
+      metadata:
+        annotations:
+          # ✅ 核心：通过注解启用 RRSA
+          alibabacloud.com/ram-role: "acs:ram::1467234491927727:role/dev-ack-oss"
+          ack.aliyun.com/ram-role-arn: "acs:ram::1467234491927727:role/dev-ack-oss"
+      # volumes:
+      #   - name: tiered-storage
+      #     persistentVolumeClaim:
+      #       claimName: tiered-storage-nfs
+    kafkaContainer:
+      # volumeMounts:
+      #   - name: tiered-storage
+      #     mountPath: /mnt/tiered-storage/
+      env:
+        - name: AWS_ROLE_ARN
+          value: "acs:ram::1467234491927727:role/dev-ack-oss"
+        - name: AWS_WEB_IDENTITY_TOKEN_FILE
+          value: /var/run/secrets/ack.alibabacloud.com/rrsa-token/token
+        # ✅ 根据您的建议，添加缺失的 Java 模块
+        # - name: JAVA_TOOL_OPTIONS
+        #   value: "--add-modules=jdk.httpserver "
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: oss-secret
+              key: akId
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oss-secret
+              key: akSecret
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: kafka-cluster-dev
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    template:
+      # ✅ 最终正确方案: 在顶层 Kafka 资源中定义模板
+      serviceAccount:
+        metadata:
+          annotations:
+            ack.aliyun.com/ram-role-arn: "acs:ram::1467234491927727:role/dev-ack-oss"
+      kafkaContainer:
+        env:
+          - name: AWS_ROLE_ARN
+            value: "acs:ram::1467234491927727:role/dev-ack-oss"
+          - name: AWS_WEB_IDENTITY_TOKEN_FILE
+            value: /var/run/secrets/ack.alibabacloud.com/rrsa-token/token
+          # - name: JAVA_TOOL_OPTIONS
+          #   value: "--add-modules=jdk.httpserver "
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: kafka-oss-credentials
+                key: access-key
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: kafka-oss-credentials
+                key: secret-key
+      pod:
+        imagePullSecrets:
+          - name: acr-1999
+    version: 4.0.0
+    metadataVersion: 4.0-IV3
+
+    # 1. Reference the custom-built image containing the Aiven tiered storage plugin.
+    image: crpi-umhpg8dvg5qptjum.cn-beijing.personal.cr.aliyuncs.com/prod-scoox/kafka:4.0.0-3
+    # image: quay.io/strimzi/kafka:0.47.0-kafka-4.0.0
+    # 2. Tiered Storage configuration as per the official documentation's structure.
+    tieredStorage:
+      type: custom
+      remoteStorageManager:
+        className: "io.aiven.kafka.tieredstorage.RemoteStorageManager"
+        # The classpath points to the single directory where both core and s3 plugins were installed.
+        classPath: "/opt/kafka/plugins/tiered-storage-aiven/*"
+        config:
+          # --- General RSM Configs (from official example) ---
+          chunk.size: "4194304"
+          key.prefix: "tiered-storage/" # Recommended to isolate data within the bucket
+
+          # --- Storage Backend Class ---
+          storage.backend.class: "io.aiven.kafka.tieredstorage.storage.s3.S3Storage"
+          storage.s3.bucket.name: "pv-kafka-dev"
+          storage.s3.region: "cn-hangzhou"
+          storage.s3.endpoint.url: "https://oss-cn-hangzhou.aliyuncs.com"
+          storage.s3.path.style.access.enabled: "false"
+
+          # --- Authentication (with correct 'storage.' prefix and V2 provider) ---
+          storage.aws.credentials.provider.class: "software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider"
+
+    # 3. General Kafka broker configuration.
+    config:
+      # --- Standard Kafka Configs ---
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+
+      # --- Tiered Storage Master Switch & RLMM Config ---
+      remote.log.storage.system.enable: "true"
+      rlmm.config.remote.log.metadata.topic.replication.factor: 3
+
+      # --- Other Tiered Storage Behavior Tuning ---
+      log.retention.check.interval.ms: 30000 # 每30秒检查一次可迁移的段，加快测试速度
+      remote.log.index.file.size.bytes: 10485760
+      remote.log.segment.size.bytes: 1073741824
+      remote.log.storage.manager.thread.pool.size: 5
+      remote.log.metadata.manager.thread.pool.size: 5
+      
+      # --- Enable tiered storage by default for all topics ---
+      remote.storage.enable: "true"
+      local.retention.ms: 60000 # 1分钟，加快测试速度
+      retention.ms: 604800000 # 7天
+
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+      - name: external
+        port: 9094
+        type: loadbalancer
+        tls: false
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
