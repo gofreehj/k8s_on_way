@@ -1,0 +1,38 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: rabbitmq-cluster-nodeport
+  namespace: rabbitmq-system
+  labels:
+    app: rabbitmq
+    app.kubernetes.io/component: rabbitmq
+    app.kubernetes.io/name: rrabbitmq-cluster
+    app.kubernetes.io/part-of: rabbitmq
+spec:
+  ports:
+    - name: amqp
+      protocol: TCP
+      appProtocol: amqp
+      port: 5672
+      targetPort: 5672
+      nodePort: 30903
+    - name: management
+      protocol: TCP
+      appProtocol: http
+      port: 15672
+      targetPort: 15672
+      nodePort: 30904
+    - name: prometheus
+      protocol: TCP
+      appProtocol: prometheus.io/metrics
+      port: 15692
+      targetPort: 15692
+      nodePort: 30905
+  selector:
+    app.kubernetes.io/name: rabbitmq-cluster
+  type: NodePort
+  sessionAffinity: None
+  externalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack

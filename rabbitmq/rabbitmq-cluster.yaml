@@ -1,0 +1,51 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: rabbitmq-cluster
+  namespace: "rabbitmq-system"
+  labels:
+    app: rabbitmq
+spec:
+  replicas: 2
+  service:
+    type: LoadBalancer
+    # type: ClusterIP
+    # type: NodePort
+  image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/rabbitmq:4.1.2-management
+  imagePullSecrets:
+  - name: acr-1999
+  persistence:
+    storageClassName: alicloud-disk-essd
+    storage: 20Gi
+  rabbitmq:
+    additionalConfig: |
+      default_user = admin
+      default_pass = Scoox@123
+    envConfig: |
+      RABBITMQ_DEFAULT_USER=admin
+      RABBITMQ_DEFAULT_PASS=Scoox@123
+  override:
+    statefulSet:
+      spec:
+        template:
+          spec:
+            containers:
+              - name: rabbitmq
+                env:
+                - name: TZ
+                  value: Asia/Shanghai
+            #     volumeMounts:
+            #       - mountPath: /var/lib/rabbitmq/mnesia
+            #         name: rabbitmq-pvc-oss
+            # volumes:
+            #   - name: rabbitmq-pvc-oss
+            #     persistentVolumeClaim:
+            #       claimName: rabbitmq-pvc-oss
+  # replicas: 1 
+  # resources:
+  #   requests:
+  #     cpu: 1000m
+  #     memory: 1Gi
+  #   limits:
+  #     cpu: 1000m
+  #     memory: 1Gi
